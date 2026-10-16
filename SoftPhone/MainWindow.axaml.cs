@@ -15,7 +15,15 @@ namespace SoftPhone
 {
     public partial class MainWindow : Window
     {
-        public const string ProfileDir = "profiles";
+        public static readonly string ProfileDir;
+
+        static MainWindow()
+        {
+            ProfileDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SoftPhone",
+                "profiles");
+            if (!Directory.Exists(ProfileDir)) Directory.CreateDirectory(ProfileDir);
+        }
+
 
         public MainWindow()
         {
