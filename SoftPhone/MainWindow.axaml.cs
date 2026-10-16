@@ -63,6 +63,40 @@ namespace SoftPhone
             {
                 LoadProfile(file);
             }
+
+            RestoreSize();
+        }
+
+        async void RestoreSize()
+        {
+            try
+            {
+                var hasSet = false;
+                try
+                {
+                    var state = Path.Combine(ProfileDir, ".state");
+                    var lines = await File.ReadAllLinesAsync(state);
+                    if (lines.Length == 0) return;
+                    var wh = lines[0].Split(',');
+                    if (!double.TryParse(wh[0], out var w) ||
+                        !double.TryParse(wh[1], out var h)) return;
+                    Width = w;
+                    Height = h;
+                    hasSet = true;
+                }
+                catch
+                {
+                    // ignored
+                }
+                finally
+                {
+                    if (!hasSet) SizeToContent = SizeToContent.WidthAndHeight;
+                }
+            }
+            catch
+            {
+                // ignored
+            }
         }
 
         void LoadProfile(string file)
@@ -185,6 +219,21 @@ namespace SoftPhone
         private void About_OnClick(object? sender, RoutedEventArgs e)
         {
             new AboutWindow().ShowDialog(this);
+        }
+
+        private async void Window_OnClosing(object? sender, WindowClosingEventArgs e)
+        {
+            try
+            {
+                if (Design.IsDesignMode) return;
+                var ss = $"{Width},{Height}";
+                var state = Path.Combine(ProfileDir, ".state");
+                await File.WriteAllTextAsync(state, ss);
+            }
+            catch
+            {
+                // ignored
+            }
         }
     }
 }
