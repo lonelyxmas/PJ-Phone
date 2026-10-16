@@ -5,7 +5,7 @@ using PJ.SoftPhoneSdk.Sip;
 namespace PJ.SoftPhoneSdk.PjPhone;
 
 /// <summary>
-/// 基于pjsip-pjsua2-cs的电话实现
+/// 基于IctBaden.pjsua的电话实现
 /// </summary>
 public class PhoneApp : IPhone
 {

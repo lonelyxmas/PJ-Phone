@@ -1,5 +1,3 @@
-using pj;
-
 namespace PJ.SoftPhoneSdk.Sip;
 
 class PhoneLoggerWriter(IPhoneLogger logger) : LogWriter

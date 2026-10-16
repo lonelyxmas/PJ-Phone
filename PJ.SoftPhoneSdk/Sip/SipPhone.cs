@@ -1,5 +1,4 @@
 using System.Reflection;
-using pj;
 
 namespace PJ.SoftPhoneSdk.Sip;
 

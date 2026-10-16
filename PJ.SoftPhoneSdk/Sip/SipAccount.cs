@@ -1,4 +1,3 @@
-using pj;
 using PJ.SoftPhoneSdk.PjPhone;
 
 namespace PJ.SoftPhoneSdk.Sip;
