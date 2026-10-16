@@ -150,7 +150,8 @@ public class SipCall : Call
         //if (state == pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED ||
         //    state == pjsip_inv_state.PJSIP_INV_STATE_NULL) return;
 
-        if (state != pjsip_inv_state.PJSIP_INV_STATE_CONNECTING) return;
+        if (state != pjsip_inv_state.PJSIP_INV_STATE_CONNECTING &&
+            state != pjsip_inv_state.PJSIP_INV_STATE_CALLING) return;
 
         //录音
         if (_audioMediaRecorder != null)
