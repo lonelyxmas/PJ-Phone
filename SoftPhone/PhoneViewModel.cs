@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
@@ -21,6 +22,7 @@ namespace SoftPhone
 
         private IPhone? _phone;
         private string? _lastCall;
+        private bool _isBusy;
 
         public PhoneViewModel(PhoneProfile profile)
         {
@@ -114,6 +116,13 @@ namespace SoftPhone
             set => Set(value);
         }
 
+        public int Duration
+        {
+            get => Get<int>();
+            set => Set(value);
+        }
+
+
         #endregion
 
         #region NumberClick
@@ -187,6 +196,9 @@ namespace SoftPhone
                         _phone?.Call(PhoneStatus);
                         ActionLabel = HangUp;
                         PhoneStatusColor = _red;
+                        Duration = 0;
+                        _isBusy = true;
+                        StartDuration();
                         return;
                     }
 
@@ -201,6 +213,26 @@ namespace SoftPhone
 
         #endregion
 
+        #region Duration
+
+        async void StartDuration()
+        {
+            try
+            {
+                while (_isBusy)
+                {
+                    await Task.Delay(1000);
+                    if (_isBusy) Duration += 1;
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
+        #endregion
+
         #region phone event
 
         private void _phone_OnRegistrationStateChanged(bool isOnline, string reason)
@@ -208,6 +240,8 @@ namespace SoftPhone
             IsLogging = false;
             IsOnline = isOnline;
             LineStatus = reason;
+            _isBusy = false;
+            Duration = 0;
         }
 
         private void _phone_OnIncomingCall(string callerNumber)
@@ -215,6 +249,9 @@ namespace SoftPhone
             ActionLabel = PickUp;
             PhoneStatus = callerNumber;
             PhoneStatusColor = _red;
+            Duration = 0;
+            _isBusy = true;
+            StartDuration();
         }
 
         private void _phone_OnCallHangup()
@@ -222,6 +259,8 @@ namespace SoftPhone
             ActionLabel = Call;
             PhoneStatus = "";
             PhoneStatusColor = _white;
+            _isBusy = false;
+            Duration = 0;
         }
 
         private void _phone_OnCallConnected()

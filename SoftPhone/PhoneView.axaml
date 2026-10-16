@@ -31,6 +31,7 @@
       <GradientStop Offset="1.0" Color="#74a6f1"/>
     </LinearGradientBrush>
     <vc:BoolNegateConvertor x:Key="BoolNegateConvertor"></vc:BoolNegateConvertor>
+    <vc:IsNotZeroConvertor x:Key="NotZeroConvertor"></vc:IsNotZeroConvertor>
   </UserControl.Resources>
   <UserControl.Styles>
     <Style Selector="TextBlock.StatusText">
@@ -153,6 +154,7 @@
                      Margin="18 0 0 0"
                      Text="{Binding LineStatus}">
           </TextBlock>
+
           <Border Grid.Row="0"
                   Grid.Column="0"
                   Width="10"
@@ -163,15 +165,31 @@
                   Classes.Offline="{Binding IsOnline,Converter={StaticResource BoolNegateConvertor}}"
                   Classes.IsOnline="{Binding IsOnline}">
           </Border>
+
+          <TextBlock Grid.Row="0"
+                     Grid.Column="0"
+                     Grid.ColumnSpan="2"
+                     Classes="StatusText"
+                     HorizontalAlignment="Center"
+                     IsVisible="{Binding Duration, Converter={StaticResource NotZeroConvertor}}"
+                     Text="{Binding Duration, StringFormat={}{0}″}"></TextBlock>
+
+
           <TextBlock Grid.Row="0"
                      Grid.Column="1"
                      Grid.ColumnSpan="2"
                      Classes="StatusText"
                      HorizontalAlignment="Right"
                      Text="{Binding Profile.Number}"></TextBlock>
-          <Border IsVisible="{Binding IsRecordingEnabled}" Grid.Row="1" Grid.Column="0" Classes="Recording" PointerPressed="OpenRecordingDir">
+
+          <Border Grid.Row="1"
+                  Grid.Column="0"
+                  IsVisible="{Binding IsRecordingEnabled}"
+                  Classes="Recording"
+                  PointerPressed="OpenRecordingDir">
             <Image Source="../images/recording.png"></Image>
           </Border>
+
           <TextBlock Grid.Row="1"
                      Grid.Column="1"
                      Grid.ColumnSpan="2"
