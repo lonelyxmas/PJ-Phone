@@ -13,6 +13,8 @@ class SipCall : Call
     private AudioMediaPlayer? _audioMediaPlayer;
     private bool _isDisposed;
     private string? _recordingFilePath;
+    private bool _recorderCreated;
+    private bool _recordingLocalRingback;
 
 
     #region 事件
@@ -177,31 +179,46 @@ class SipCall : Call
         _audioMediaPlayer.createPlayer(media);
 
         // 将播放器传输到通话音频媒体（发送给对方）
-        _audioMediaPlayer.startTransmit(audioMedia);
+        TryStartTransmit(_audioMediaPlayer, audioMedia);
 
         // 如果启用了录音，也将播放器传输到录音器（录制播放的声音）
-        _audioMediaPlayer.startTransmit(_audioMediaRecorder);
+        if (_recordingFilePath != null)
+        {
+            EnsureRecorderCreated();
+            TryStartTransmit(_audioMediaPlayer, _audioMediaRecorder);
+        }
     }
 
     #endregion
 
     #region 私有方法
 
+    /// <summary>
+    /// 连接通话音频媒体与录音器、本机声音设备
+    /// </summary>
+    /// <param name="audioMedia">通话音频媒体</param>
+    /// <param name="state">当前通话状态</param>
     private void ConnectAudioDevice(AudioMedia? audioMedia, pjsip_inv_state state)
     {
-        //if (state == pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED ||
-        //    state == pjsip_inv_state.PJSIP_INV_STATE_NULL) return;
+        // 仅在通话真实存在（EARLY/CALLING/CONNECTING/CONFIRMED）时接线：
+        //  - EARLY：180/183 早期媒体阶段，对方彩铃在此阶段下发，必须放行才能录到彩铃。
+        //  - NULL/DISCONNECTED：通话不存在或已结束，跳过。
+        //  - INCOMING：接听流程（Answer）单独处理，这里跳过以免重复接线。
+        if (state == pjsip_inv_state.PJSIP_INV_STATE_NULL ||
+            state == pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED ||
+            state == pjsip_inv_state.PJSIP_INV_STATE_INCOMING) return;
 
-        if (state != pjsip_inv_state.PJSIP_INV_STATE_CONNECTING &&
-            state != pjsip_inv_state.PJSIP_INV_STATE_CALLING) return;
+        EnsureRecorderCreated();
 
-        if (_recordingFilePath != null)
+        // 对方彩铃在 EARLY 阶段下发，此时通话音频媒体尚未进入 CONFIRMED。
+        // 对尚未接入会议桥的媒体端口调用 startTransmit 会触发 PJSIP 本地内存访问异常，
+        // 因此只有在彩铃确实通过通话媒体流下发（媒体已 ACTIVE）时才录制通话媒体。
+        if (_recordingFilePath != null && audioMedia != null && IsMediaActive())
         {
-            //录音：同时录制通话对方的声音和本地麦克风的声音
             _logger.Debug(Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.Name,
                 $"连接录音文件 {state} {CallId}...");
             //audioMedia 对方的声音，录制他
-            audioMedia?.startTransmit(_audioMediaRecorder);
+            TryStartTransmit(audioMedia, _audioMediaRecorder);
         }
 
         if (!SipPhone.HasSoundDevice) return;
@@ -211,24 +228,93 @@ class SipCall : Call
         if (audioMedia == null || captureDevMedia == null) return;
 
         //录制本地麦克风的声音
-        captureDevMedia.startTransmit(_audioMediaRecorder);
-
-        // This will connect the sound device/mic to the call audio media
-        captureDevMedia.startTransmit(audioMedia);
-
-        // And this will connect the call audio media to the sound device/speaker
-        audioMedia.startTransmit(captureDevMedia);
-
-
-        if (captureDevMedia.getPortInfo().listeners.Count(s => s == audioMedia.getPortId()) < 1)
+        if (_recordingFilePath != null)
         {
-            captureDevMedia.startTransmit(audioMedia);
+            TryStartTransmit(captureDevMedia, _audioMediaRecorder);
         }
 
-        if (audioMedia.getPortInfo().listeners.Count(s => s == captureDevMedia.getPortId()) < 1)
+        // 麦克风 → 通话媒体（对方听到本机声音）
+        TryStartTransmit(captureDevMedia, audioMedia);
+
+        // 通话媒体 → 扬声器（本机听到对方声音）
+        TryStartTransmit(audioMedia, captureDevMedia);
+    }
+
+    /// <summary>
+    /// 建立音频传输链路，已存在相同链路时跳过。
+    /// 早期媒体、CONNECTING、CONFIRMED 等阶段可能多次进入本流程，
+    /// 重复 startTransmit 会让 PJSIP 抛出端口已连接的异常。
+    /// </summary>
+    /// <param name="from">音频来源</param>
+    /// <param name="to">音频目标</param>
+    private static void TryStartTransmit(AudioMedia from, AudioMedia to)
+    {
+        var targetPortId = to.getPortId();
+        if (from.getPortInfo().listeners.Any(listener => listener == targetPortId)) return;
+        from.startTransmit(to);
+    }
+
+    /// <summary>
+    /// 确保录音器已经创建，且只创建一次，避免重复 createRecorder 报错
+    /// </summary>
+    private void EnsureRecorderCreated()
+    {
+        if (_recorderCreated) return;
+        if (_recordingFilePath == null) return;
+        _recorderCreated = true;
+        _logger.Debug(Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.Name,
+            $"正在写入录音文件 {_recordingFilePath} ...");
+        _audioMediaRecorder.createRecorder(_recordingFilePath);
+    }
+
+    /// <summary>
+    /// 当前通话是否已经存在活跃的音频媒体，用于区分 180 无SDP（无媒体）与 183 早期媒体/彩铃（有媒体）
+    /// </summary>
+    private bool IsMediaActive()
+    {
+        var ci = getInfo();
+        if (ci?.media == null) return false;
+        for (var i = 0; i < ci.media.Count; i++)
         {
-            audioMedia.startTransmit(captureDevMedia);
+            var m = ci.media[i];
+            if (m.type == pjmedia_type.PJMEDIA_TYPE_AUDIO &&
+                m.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE) return true;
         }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 录制本机扬声器里的声音（本地回铃音）。180 Ringing 不带SDP时，对方彩铃/回铃音
+    /// 不经通话媒体流下发，而是由 PJSIP 直接输出到本机播放设备，只有接上播放设备才能录到。
+    /// </summary>
+    private void StartRecordingLocalRingback()
+    {
+        if (_recordingFilePath == null) return;
+        if (!SipPhone.HasSoundDevice) return;
+        if (_recordingLocalRingback) return;
+
+        var playbackDevMedia = Endpoint.instance().audDevManager().getPlaybackDevMedia();
+        if (playbackDevMedia == null) return;
+
+        _logger.Debug(Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.Name,
+            $"连接本地回铃音录音 {CallId} ...");
+        TryStartTransmit(playbackDevMedia, _audioMediaRecorder);
+        _recordingLocalRingback = true;
+    }
+
+    /// <summary>
+    /// 停止录制本机扬声器里的声音，避免进入正式通话后被重复录制
+    /// </summary>
+    private void StopRecordingLocalRingback()
+    {
+        if (!_recordingLocalRingback) return;
+        _recordingLocalRingback = false;
+        if (_recordingFilePath == null) return;
+        if (!SipPhone.HasSoundDevice) return;
+
+        var playbackDevMedia = Endpoint.instance().audDevManager().getPlaybackDevMedia();
+        playbackDevMedia?.stopTransmit(_audioMediaRecorder);
     }
 
     #endregion
@@ -247,11 +333,19 @@ class SipCall : Call
         switch (ci.state)
         {
             case pjsip_inv_state.PJSIP_INV_STATE_CALLING:
-                if (_recordingFilePath != null)
+                EnsureRecorderCreated();
+                break;
+            case pjsip_inv_state.PJSIP_INV_STATE_EARLY:
+                EnsureRecorderCreated();
+                // 外呼早期媒体阶段，对方彩铃在这里下发：
+                //  - 180 Ringing 不带SDP：彩铃/回铃音由 PJSIP 直接输出到本机播放设备，
+                //    通话媒体流尚未建立，只能接上播放设备才能录到。
+                //  - 183 Session Progress 带SDP（早期媒体/彩铃）：通话音频媒体已建立，
+                //    由 onCallMediaState→ConnectAudioDevice 录制，此处不接播放设备，避免重复录。
+                // 来电（InComing）在此阶段不会产生彩铃，必须排除，否则会误录本机扬声器声音。
+                if (Direction == CallDirection.OutGoing && !IsMediaActive())
                 {
-                    _logger.Debug(Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.Name,
-                        $"正在写入录音文件 {_recordingFilePath} ...");
-                    _audioMediaRecorder.createRecorder(_recordingFilePath);
+                    StartRecordingLocalRingback();
                 }
 
                 break;
@@ -260,6 +354,9 @@ class SipCall : Call
                 break;
             case pjsip_inv_state.PJSIP_INV_STATE_CONFIRMED:
                 State = CallState.Connected;
+                // 进入正式通话后，对方声音已通过通话媒体流录制，断开本地回铃音录音链路，
+                // 避免扬声器声音被重复录进文件
+                StopRecordingLocalRingback();
                 break;
             case pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED:
                 State = CallState.DisConnected;
@@ -286,6 +383,8 @@ class SipCall : Call
             if (cmi.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE ||
                 cmi.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_REMOTE_HOLD)
             {
+                // 通话媒体已激活，回铃音已被真实媒体取代，移除播放设备→录音器链路
+                StopRecordingLocalRingback();
 
                 var am = getAudioMedia(i); //TODO AudioMedia.typecastFromMedia(getMedia((uint)i));
 
